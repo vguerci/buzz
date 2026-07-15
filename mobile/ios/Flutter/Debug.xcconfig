@@ -8,6 +8,11 @@
 BUNDLE_IDENTIFIER = com.buzz.buzzMobile
 APP_DISPLAY_NAME = Buzz
 
+BUZZ_APP_GROUP_IDENTIFIER = group.$(BUNDLE_IDENTIFIER)
+BUZZ_KEYCHAIN_ACCESS_GROUP = $(BUNDLE_IDENTIFIER)
+BUZZ_IOS_PUSH_ENVIRONMENT = development
+BUZZ_APP_ATTEST_ENVIRONMENT = development
+
 // Worktree-aware debug identity (gitignored, written by
 // scripts/mobile-worktree-overrides.sh): a per-worktree bundle identifier
 // and a branch-labelled display name so debug builds from multiple worktrees
