@@ -302,6 +302,37 @@ export function resolveLinkPreview(
   };
 }
 
+export function isBuzzEntityPreview(preview: SupportedLinkPreview): boolean {
+  return (
+    preview.kind === "buzz-pull-request" ||
+    preview.kind === "buzz-issue" ||
+    preview.kind === "buzz-repository"
+  );
+}
+
+/**
+ * Recipient-side `buzz://` entity cards must render even when the relay
+ * lookup yields no metadata: `useResolvedLinkPreviews` drops null-metadata
+ * previews (correct for external links — no metadata means no card), but
+ * entity links always carry a usable fallback title (the repo d-tag, or
+ * `<dtag> #<id8>` for PRs/issues — see `buzzEntityFallbackTitle`). Re-adds
+ * recognized entity previews on their fallback title; non-entity previews
+ * keep the hook's drop behavior.
+ */
+export function withEntityFallbacks(
+  previews: SupportedLinkPreview[],
+  resolved: ResolvedLinkPreview[],
+): ResolvedLinkPreview[] {
+  const byHref = new Map(resolved.map((preview) => [preview.href, preview]));
+  return previews.flatMap((preview) => {
+    const match = byHref.get(preview.href);
+    if (match) return [match];
+    return isBuzzEntityPreview(preview)
+      ? [{ ...preview, imageState: "none" as const }]
+      : [];
+  });
+}
+
 export function useResolvedLinkPreviews(
   previews: SupportedLinkPreview[],
 ): ResolvedLinkPreview[] {
