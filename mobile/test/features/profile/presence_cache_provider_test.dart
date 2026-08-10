@@ -131,7 +131,94 @@ void main() {
     // There should be no literal "pubkey" key in the map.
     expect(cache.containsKey('pubkey'), isFalse);
   });
+
+  test('seeds every pubkey tracked in the same frame', () async {
+    // Regression test: each row tracks a single pubkey, so four rows fire four
+    // track() calls at once. An earlier version treated each new seed as
+    // superseding the in-flight ones, so only the last pubkey was ever seeded
+    // and the rest stayed offline until their next live heartbeat.
+    final relaySession = _RecordingRelaySessionNotifier();
+    final container = _buildContainer(relaySession: relaySession);
+    addTearDown(container.dispose);
+
+    for (final agent in ['agent-a', 'agent-b', 'agent-c', 'agent-d']) {
+      relaySession.seedResponses[agent] = _synthesizedPresence(agent, 'online');
+    }
+
+    container.read(presenceCacheProvider);
+    await _pumpEventQueue();
+
+    final notifier = container.read(presenceCacheProvider.notifier);
+    for (final agent in ['agent-a', 'agent-b', 'agent-c', 'agent-d']) {
+      notifier.track([agent]);
+    }
+    await _pumpSeed();
+
+    final cache = container.read(presenceCacheProvider);
+    expect(cache['agent-a'], 'online');
+    expect(cache['agent-b'], 'online');
+    expect(cache['agent-c'], 'online');
+    expect(cache['agent-d'], 'online');
+    // The four calls coalesce into a single query.
+    expect(relaySession.queries, hasLength(1));
+  });
+
+  test('seed resolves the subject from the p tag', () async {
+    final relaySession = _RecordingRelaySessionNotifier();
+    final container = _buildContainer(relaySession: relaySession);
+    addTearDown(container.dispose);
+
+    relaySession.seedResponses['alice'] = _synthesizedPresence(
+      'alice',
+      'online',
+    );
+
+    container.read(presenceCacheProvider);
+    await _pumpEventQueue();
+
+    container.read(presenceCacheProvider.notifier).track(['alice']);
+    await _pumpSeed();
+
+    // Attributed to alice, not to the relay that signed the event.
+    expect(container.read(presenceCacheProvider)['alice'], 'online');
+    expect(container.read(presenceCacheProvider).containsKey('relay'), isFalse);
+  });
+
+  test('seed does not overwrite a fresher live status', () async {
+    final relaySession = _RecordingRelaySessionNotifier();
+    final container = _buildContainer(relaySession: relaySession);
+    addTearDown(container.dispose);
+
+    relaySession.seedResponses['alice'] = _synthesizedPresence(
+      'alice',
+      'online',
+    );
+
+    container.read(presenceCacheProvider);
+    await _pumpEventQueue();
+
+    container.read(presenceCacheProvider.notifier).track(['alice']);
+    // A live event lands while the seed is still in flight.
+    relaySession.emit(_presence('alice', 'away'));
+    await _pumpSeed();
+
+    expect(container.read(presenceCacheProvider)['alice'], 'away');
+  });
 }
+
+/// A presence event as the relay synthesizes it: signed by the relay, with the
+/// subject carried in a `p` tag rather than the author field.
+NostrEvent _synthesizedPresence(String subject, String status) => NostrEvent(
+  id: 'evt-relay-$subject-$status',
+  pubkey: 'relay',
+  createdAt: 2000,
+  kind: EventKind.presenceUpdate,
+  tags: [
+    ['p', subject],
+  ],
+  content: status,
+  sig: 'sig',
+);
 
 NostrEvent _presence(String pubkey, String status) => NostrEvent(
   id: 'evt-$pubkey-$status',
@@ -148,6 +235,12 @@ Future<void> _pumpEventQueue() async {
   await Future<void>.delayed(Duration.zero);
 }
 
+/// Waits past the seed batching window and the query that follows it.
+Future<void> _pumpSeed() async {
+  await Future<void>.delayed(const Duration(milliseconds: 50));
+  await _pumpEventQueue();
+}
+
 ProviderContainer _buildContainer({
   required _RecordingRelaySessionNotifier relaySession,
 }) {
@@ -161,10 +254,24 @@ ProviderContainer _buildContainer({
 
 class _RecordingRelaySessionNotifier extends RelaySessionNotifier {
   final List<NostrFilter> filters = [];
+  final List<List<NostrFilter>> queries = [];
   final List<void Function(NostrEvent)> _listeners = [];
+
+  /// Events returned by [queryRelay], keyed by the pubkey the caller asked for.
+  final Map<String, NostrEvent> seedResponses = {};
 
   @override
   SessionState build() => const SessionState(status: SessionStatus.connected);
+
+  @override
+  Future<List<NostrEvent>> queryRelay(
+    List<NostrFilter> filters, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    queries.add(filters);
+    final requested = filters.expand((f) => f.authors ?? const <String>[]);
+    return [for (final pubkey in requested) ?seedResponses[pubkey]];
+  }
 
   @override
   Future<void Function()> subscribe(
