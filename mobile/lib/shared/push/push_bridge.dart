@@ -66,6 +66,25 @@ class BuzzPushEndpointGrant {
   }
 }
 
+/// iOS notification authorization, as reported by `getNotificationSettings`.
+///
+/// Worth reading separately from [apnsDeviceToken]: a declined prompt never
+/// reaches `registerForRemoteNotifications`, so no token and no registration
+/// error are produced, which looks exactly like a registration that never
+/// completed.
+final pushAuthorizationStatus = ValueNotifier<String?>(null);
+
+Future<void> readBuzzPushAuthorizationStatus() async {
+  if (defaultTargetPlatform != TargetPlatform.iOS) return;
+  try {
+    pushAuthorizationStatus.value = await _channel.invokeMethod<String>(
+      'notificationAuthorization',
+    );
+  } catch (error) {
+    pushAuthorizationStatus.value = 'unavailable ($error)';
+  }
+}
+
 Future<List<BuzzPushEndpointGrant>> readBuzzPushEndpointGrants() async {
   if (defaultTargetPlatform != TargetPlatform.iOS) return const [];
   try {

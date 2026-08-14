@@ -11,6 +11,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../shared/auth/auth.dart';
 import '../../shared/clipboard_utils.dart';
 import '../../shared/community/community_membership_provider.dart';
+import '../../shared/push/push_bridge.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/app_list.dart';
@@ -24,6 +25,7 @@ import 'theme_picker_page.dart';
 part 'settings_page/appearance_section.dart';
 part 'settings_page/community_section.dart';
 part 'settings_page/connection_section.dart';
+part 'settings_page/push_section.dart';
 
 class SettingsPage extends HookConsumerWidget {
   /// Creates the settings page.
@@ -86,6 +88,7 @@ class SettingsPage extends HookConsumerWidget {
                 _ConnectionSection(
                   identityRecoveryPageBuilder: identityRecoveryPageBuilder,
                 ),
+                const _PushSection(),
                 const _RemoveCommunitySection(),
               ],
             ),

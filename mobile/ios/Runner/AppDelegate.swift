@@ -234,6 +234,24 @@ import UserNotifications
           )
         )
       }
+    case "notificationAuthorization":
+      // Reported separately from the APNs token because the two failure modes
+      // are indistinguishable from Dart: a declined prompt never calls
+      // registerForRemoteNotifications, so no token and no registration error
+      // ever arrive, which is identical to a registration that silently never
+      // completed.
+      UNUserNotificationCenter.current().getNotificationSettings { settings in
+        let status: String
+        switch settings.authorizationStatus {
+        case .notDetermined: status = "not determined"
+        case .denied: status = "denied"
+        case .authorized: status = "authorized"
+        case .provisional: status = "provisional"
+        case .ephemeral: status = "ephemeral"
+        @unknown default: status = "unknown"
+        }
+        DispatchQueue.main.async { result(status) }
+      }
     case "devEnrollPush":
       handleDevPushEnrollment(call, result: result)
     case "devMarkPushLeasePublished":
