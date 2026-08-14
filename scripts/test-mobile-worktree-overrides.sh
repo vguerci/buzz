@@ -439,7 +439,11 @@ signing_map=$(awk '
     next
   }
 
-  # Pass 3 emits one row for each team-bearing build configuration.
+  # Pass 3 emits one row for each entitlement-bearing build configuration.
+  # Keyed on entitlements rather than on DEVELOPMENT_TEAM: the signed targets
+  # deliberately declare no team, so that the gitignored
+  # AppOverrides.xcconfig can supply one. Keying on the team would silently
+  # emit nothing for exactly the targets this check exists to cover.
   !in_build_configuration && /\/\* (Debug|Release|Profile) \*\/ = \{/ {
     in_build_configuration = 1
     configuration_id = $1
@@ -467,21 +471,21 @@ signing_map=$(awk '
 
     depth += gsub(/\{/, "{") - gsub(/\}/, "}")
     if (depth == 0) {
-      if (team != "") {
+      if (entitlements != "NONE") {
         target_name = configuration_id in targets ? targets[configuration_id] : "UNMAPPED:" configuration_id
-        print target_name, configuration, base_configuration, team, entitlements
+        print target_name, configuration, base_configuration, (team == "" ? "-" : team), entitlements
       }
       in_build_configuration = 0
     }
   }
 ' "$pbxproj" "$pbxproj" "$pbxproj" | sort)
 expected_signing_map=$(printf '%s\n' \
-  'NotificationService Debug Flutter/Debug.xcconfig JMTDPW9CG3 NotificationService/NotificationService.entitlements' \
-  'NotificationService Profile Flutter/Release.xcconfig EYF346PHUG NotificationService/NotificationService.entitlements' \
-  'NotificationService Release Flutter/Release.xcconfig EYF346PHUG NotificationService/NotificationService.entitlements' \
-  'Runner Debug Flutter/Debug.xcconfig JMTDPW9CG3 Runner/Runner.entitlements' \
-  'Runner Profile Flutter/Release.xcconfig EYF346PHUG Runner/Runner.entitlements' \
-  'Runner Release Flutter/Release.xcconfig EYF346PHUG Runner/Runner.entitlements')
+  'NotificationService Debug Flutter/Debug.xcconfig - NotificationService/NotificationService.entitlements' \
+  'NotificationService Profile Flutter/Release.xcconfig - NotificationService/NotificationService.entitlements' \
+  'NotificationService Release Flutter/Release.xcconfig - NotificationService/NotificationService.entitlements' \
+  'Runner Debug Flutter/Debug.xcconfig - Runner/Runner.entitlements' \
+  'Runner Profile Flutter/Release.xcconfig - Runner/Runner.entitlements' \
+  'Runner Release Flutter/Release.xcconfig - Runner/Runner.entitlements')
 if [[ "$signing_map" == "$expected_signing_map" ]]; then
   pass "Runner and NotificationService signing settings match each build configuration"
 else

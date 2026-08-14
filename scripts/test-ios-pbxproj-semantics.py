@@ -10,12 +10,12 @@ PBXPROJ = Path("mobile/ios/Runner.xcodeproj/project.pbxproj")
 # This asserts plutil-resolved pbxproj declarations, not object-key uniqueness or
 # the final xcconfig-expanded bundle identity.
 EXPECTED_ROWS = """\
-NotificationService Debug Flutter/Debug.xcconfig JMTDPW9CG3 NotificationService/NotificationService.entitlements $(BUNDLE_IDENTIFIER).NotificationService
-NotificationService Profile Flutter/Release.xcconfig EYF346PHUG NotificationService/NotificationService.entitlements $(BUNDLE_IDENTIFIER).NotificationService
-NotificationService Release Flutter/Release.xcconfig EYF346PHUG NotificationService/NotificationService.entitlements $(BUNDLE_IDENTIFIER).NotificationService
-Runner Debug Flutter/Debug.xcconfig JMTDPW9CG3 Runner/Runner.entitlements $(BUNDLE_IDENTIFIER)
-Runner Profile Flutter/Release.xcconfig EYF346PHUG Runner/Runner.entitlements $(BUNDLE_IDENTIFIER)
-Runner Release Flutter/Release.xcconfig EYF346PHUG Runner/Runner.entitlements $(BUNDLE_IDENTIFIER)
+NotificationService Debug Flutter/Debug.xcconfig - NotificationService/NotificationService.entitlements $(BUNDLE_IDENTIFIER).NotificationService
+NotificationService Profile Flutter/Release.xcconfig - NotificationService/NotificationService.entitlements $(BUNDLE_IDENTIFIER).NotificationService
+NotificationService Release Flutter/Release.xcconfig - NotificationService/NotificationService.entitlements $(BUNDLE_IDENTIFIER).NotificationService
+Runner Debug Flutter/Debug.xcconfig - Runner/Runner.entitlements $(BUNDLE_IDENTIFIER)
+Runner Profile Flutter/Release.xcconfig - Runner/Runner.entitlements $(BUNDLE_IDENTIFIER)
+Runner Release Flutter/Release.xcconfig - Runner/Runner.entitlements $(BUNDLE_IDENTIFIER)
 RunnerTests Debug Target Support Files/Pods-RunnerTests/Pods-RunnerTests.debug.xcconfig - - $(BUNDLE_IDENTIFIER).RunnerTests
 RunnerTests Profile Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig - - $(BUNDLE_IDENTIFIER).RunnerTests
 RunnerTests Release Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig - - $(BUNDLE_IDENTIFIER).RunnerTests
@@ -56,7 +56,10 @@ def semantic_rows(project: dict) -> list[str]:
                         target.get("name", "-"),
                         configuration.get("name", "-"),
                         base_path,
-                        settings.get("DEVELOPMENT_TEAM", "-"),
+                        # An empty DEVELOPMENT_TEAM is deliberate: it leaves the
+                        # team to the gitignored AppOverrides.xcconfig seam, so
+                        # report it the same way as an absent one.
+                        settings.get("DEVELOPMENT_TEAM") or "-",
                         settings.get("CODE_SIGN_ENTITLEMENTS", "-"),
                         settings.get("PRODUCT_BUNDLE_IDENTIFIER", "-"),
                     ]
