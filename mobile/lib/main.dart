@@ -4,9 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'shared/push/push_bridge.dart';
+import 'shared/push/push_lease_bootstrap.dart';
 import 'shared/theme/theme_provider.dart';
 
-void main() => runBuzzApp(const App());
+void main() => runBuzzApp(const PushLeaseBootstrap(child: App()));
 
 Future<void> runBuzzApp(Widget app) async {
   WidgetsFlutterBinding.ensureInitialized();

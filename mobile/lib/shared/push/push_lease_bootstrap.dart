@@ -10,10 +10,17 @@ import '../relay/signed_event_relay.dart';
 import 'dev_push_lease.dart';
 import 'push_bridge.dart';
 
-class DebugPushLeaseBootstrap extends HookConsumerWidget {
+/// Enrols the device with the push gateway and publishes its `kind:30350`
+/// lease once the relay session, signing key, and APNs token are all present.
+///
+/// This runs in every build, not only debug ones. Without it the app registers
+/// for APNs and can receive a wake, but the relay has no lease to match, so
+/// nothing is ever sent — which is what a TestFlight build did while this was
+/// mounted only from a debug-only entry point.
+class PushLeaseBootstrap extends HookConsumerWidget {
   final Widget child;
 
-  const DebugPushLeaseBootstrap({required this.child, super.key});
+  const PushLeaseBootstrap({required this.child, super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

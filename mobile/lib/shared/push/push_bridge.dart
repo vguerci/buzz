@@ -87,11 +87,6 @@ Future<BuzzPushEndpointGrant> enrollBuzzDevPush(
   String relayUrl,
   String gatewayUrl,
 ) async {
-  if (!kDebugMode) {
-    throw UnsupportedError(
-      'Development push enrollment is unavailable outside debug builds.',
-    );
-  }
   final raw = await _channel.invokeMapMethod<dynamic, dynamic>(
     'devEnrollPush',
     {'relayUrl': relayUrl, 'gatewayUrl': gatewayUrl},
@@ -105,11 +100,6 @@ Future<BuzzPushEndpointGrant> enrollBuzzDevPush(
 }
 
 Future<void> markBuzzDevPushLeasePublished(BuzzPushEndpointGrant grant) async {
-  if (!kDebugMode) {
-    throw UnsupportedError(
-      'Development push publication state is unavailable outside debug builds.',
-    );
-  }
   await _channel.invokeMethod<void>('devMarkPushLeasePublished', {
     'relayOrigin': grant.relayOrigin,
     'appProfile': grant.appProfile,
