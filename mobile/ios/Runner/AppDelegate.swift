@@ -17,9 +17,7 @@ import UserNotifications
   private lazy var endpointGrantStore = BuzzPushEndpointGrantKeychainStore(
     accessGroup: Bundle.main.object(forInfoDictionaryKey: "BuzzKeychainAccessGroup") as? String
   )
-  #if DEBUG
-    private var devEnrollmentTask: Task<Void, Never>?
-  #endif
+  private var devEnrollmentTask: Task<Void, Never>?
   private var appGroupIdentifier: String? {
     Bundle.main.object(forInfoDictionaryKey: "BuzzAppGroupIdentifier") as? String
   }
@@ -236,133 +234,139 @@ import UserNotifications
           )
         )
       }
-    #if DEBUG
-      case "devEnrollPush":
-        handleDevPushEnrollment(call, result: result)
-      case "devMarkPushLeasePublished":
-        handleDevPushLeasePublished(call, result: result)
-    #endif
+    case "devEnrollPush":
+      handleDevPushEnrollment(call, result: result)
+    case "devMarkPushLeasePublished":
+      handleDevPushLeasePublished(call, result: result)
     default:
       result(FlutterMethodNotImplemented)
     }
   }
 
-  #if DEBUG
-    private func handleDevPushEnrollment(
-      _ call: FlutterMethodCall,
-      result: @escaping FlutterResult
-    ) {
-      guard devEnrollmentTask == nil else {
-        result(
-          FlutterError(
-            code: "enrollment_in_progress",
-            message: "Development push enrollment is already running.",
-            details: nil
-          )
+  private func handleDevPushEnrollment(
+    _ call: FlutterMethodCall,
+    result: @escaping FlutterResult
+  ) {
+    guard devEnrollmentTask == nil else {
+      result(
+        FlutterError(
+          code: "enrollment_in_progress",
+          message: "Push enrollment is already running.",
+          details: nil
         )
-        return
-      }
-      guard let deviceToken = apnsDeviceToken else {
-        result(
-          FlutterError(
-            code: "missing_apns_token",
-            message: "APNs has not supplied a device token.",
-            details: nil
-          )
+      )
+      return
+    }
+    guard let deviceToken = apnsDeviceToken else {
+      result(
+        FlutterError(
+          code: "missing_apns_token",
+          message: "APNs has not supplied a device token.",
+          details: nil
         )
-        return
-      }
-      guard !deviceToken.isEmpty else {
-        preconditionFailure("APNs supplied an empty device token")
-      }
-      guard let arguments = call.arguments as? [String: Any],
-        let relayText = arguments["relayUrl"] as? String,
-        let relayURL = URL(string: relayText),
-        let gatewayText = arguments["gatewayUrl"] as? String,
-        let gatewayURL = URL(string: gatewayText)
-      else {
-        result(
-          FlutterError(
-            code: "invalid_arguments",
-            message: "Development push enrollment requires relayUrl and gatewayUrl.",
-            details: nil
-          )
+      )
+      return
+    }
+    guard !deviceToken.isEmpty else {
+      preconditionFailure("APNs supplied an empty device token")
+    }
+    guard let arguments = call.arguments as? [String: Any],
+      let relayText = arguments["relayUrl"] as? String,
+      let relayURL = URL(string: relayText),
+      let gatewayText = arguments["gatewayUrl"] as? String,
+      let gatewayURL = URL(string: gatewayText)
+    else {
+      result(
+        FlutterError(
+          code: "invalid_arguments",
+          message: "Push enrollment requires relayUrl and gatewayUrl.",
+          details: nil
         )
-        return
-      }
+      )
+      return
+    }
 
-      do {
-        let driver = try BuzzDevPushEnrollmentDriver(
-          gatewayBaseURL: gatewayURL,
-          store: endpointGrantStore
-        )
-        devEnrollmentTask = Task { [weak self] in
-          defer { self?.devEnrollmentTask = nil }
-          do {
-            let record = try await driver.enroll(deviceToken: deviceToken, relayURL: relayURL)
-            await MainActor.run { result(record.flutterArguments) }
-          } catch {
-            await MainActor.run {
-              result(
-                FlutterError(
-                  code: "dev_enrollment_failed",
-                  message: "Development push enrollment failed.",
-                  details: error.localizedDescription
-                )
+    do {
+      // Always attest through Apple's App Attest service, in every build.
+      // BuzzPushKit also ships a canned-attestation provider for the
+      // cable-attached development loop, but the gateway admits production
+      // AAGUID only and has no bypass path, so wiring it here would only work
+      // against a gateway running the bypass whose upstream PR was closed
+      // rather than merged. Selecting the provider per configuration would
+      // also leave this call site compiled only in a release archive.
+      let driver = try BuzzDevPushEnrollmentDriver(
+        gatewayBaseURL: gatewayURL,
+        store: endpointGrantStore,
+        appAttestKeychainAccessGroup: Bundle.main.object(
+          forInfoDictionaryKey: "BuzzKeychainAccessGroup"
+        ) as? String
+      )
+      devEnrollmentTask = Task { [weak self] in
+        defer { self?.devEnrollmentTask = nil }
+        do {
+          let record = try await driver.enroll(deviceToken: deviceToken, relayURL: relayURL)
+          await MainActor.run { result(record.flutterArguments) }
+        } catch {
+          await MainActor.run {
+            result(
+              FlutterError(
+                code: "dev_enrollment_failed",
+                message: "Push enrollment failed.",
+                details: error.localizedDescription
               )
-            }
+            )
           }
         }
-      } catch {
-        result(
-          FlutterError(
-            code: "dev_enrollment_configuration_failed",
-            message: "Development push enrollment is not configured.",
-            details: error.localizedDescription
-          )
-        )
       }
+    } catch {
+      result(
+        FlutterError(
+          code: "dev_enrollment_configuration_failed",
+          message: "Push enrollment is not configured.",
+          details: error.localizedDescription
+        )
+      )
     }
+  }
 
-    private func handleDevPushLeasePublished(
-      _ call: FlutterMethodCall,
-      result: @escaping FlutterResult
-    ) {
-      guard let arguments = call.arguments as? [String: Any],
-        let relayOrigin = arguments["relayOrigin"] as? String,
-        let appProfile = arguments["appProfile"] as? String,
-        let generation = (arguments["generation"] as? NSNumber)?.int64Value,
-        !relayOrigin.isEmpty,
-        !appProfile.isEmpty,
-        generation > 0
-      else {
-        result(
-          FlutterError(
-            code: "invalid_arguments",
-            message: "Published push lease state requires relayOrigin, appProfile, and generation.",
-            details: nil
-          )
+  private func handleDevPushLeasePublished(
+    _ call: FlutterMethodCall,
+    result: @escaping FlutterResult
+  ) {
+    guard let arguments = call.arguments as? [String: Any],
+      let relayOrigin = arguments["relayOrigin"] as? String,
+      let appProfile = arguments["appProfile"] as? String,
+      let generation = (arguments["generation"] as? NSNumber)?.int64Value,
+      !relayOrigin.isEmpty,
+      !appProfile.isEmpty,
+      generation > 0
+    else {
+      result(
+        FlutterError(
+          code: "invalid_arguments",
+          message: "Published push lease state requires relayOrigin, appProfile, and generation.",
+          details: nil
         )
-        return
-      }
-      do {
-        try endpointGrantStore.markPublished(
-          relayOrigin: relayOrigin,
-          appProfile: appProfile,
-          generation: generation
-        )
-        result(nil)
-      } catch {
-        result(
-          FlutterError(
-            code: "push_lease_state_write_failed",
-            message: "Unable to persist the published push lease generation.",
-            details: error.localizedDescription
-          )
-        )
-      }
+      )
+      return
     }
-  #endif
+    do {
+      try endpointGrantStore.markPublished(
+        relayOrigin: relayOrigin,
+        appProfile: appProfile,
+        generation: generation
+      )
+      result(nil)
+    } catch {
+      result(
+        FlutterError(
+          code: "push_lease_state_write_failed",
+          message: "Unable to persist the published push lease generation.",
+          details: error.localizedDescription
+        )
+      )
+    }
+  }
 
   private func savePushCommunitySnapshot(_ communities: [[String: Any]]) throws {
     guard let appGroupIdentifier else {
