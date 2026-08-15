@@ -50,7 +50,21 @@ class PushLeaseBootstrap extends HookConsumerWidget {
           nsec: nsec,
         );
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          unawaited(_publish(config, memberPubkey, relay));
+          // Record the reason rather than dropping it. Every step below can
+          // throw — the NIP-11 descriptor fetch, the native enrollment, the
+          // lease publish — and an unawaited future carries the error nowhere,
+          // so a failed enrollment is indistinguishable from one that never
+          // ran: no grant, no notification, and nothing on screen.
+          unawaited(
+            _publish(config, memberPubkey, relay).catchError((
+              Object error,
+              StackTrace stack,
+            ) {
+              pushEndpointGrantError.value = error.toString();
+              debugPrint('Push lease bootstrap failed: $error');
+              debugPrintStack(stackTrace: stack);
+            }),
+          );
         });
       }
       return null;
