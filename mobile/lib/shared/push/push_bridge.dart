@@ -66,6 +66,24 @@ class BuzzPushEndpointGrant {
   }
 }
 
+/// The app profile this build enrols as, mirrored from the native driver.
+///
+/// The native side derives it from the build setting that also fills the
+/// `aps-environment` entitlement, so the profile cannot drift from the APNs
+/// environment the binary actually uses. Defaults to sandbox for non-iOS hosts
+/// and for tests, which never reach a gateway.
+String buzzPushAppProfile = 'buzz-ios-sandbox';
+
+Future<void> syncBuzzPushAppProfile() async {
+  if (defaultTargetPlatform != TargetPlatform.iOS) return;
+  try {
+    final profile = await _channel.invokeMethod<String>('pushAppProfile');
+    if (profile != null && profile.isNotEmpty) buzzPushAppProfile = profile;
+  } catch (error) {
+    debugPrint('Push app profile lookup failed: $error');
+  }
+}
+
 /// iOS notification authorization, as reported by `getNotificationSettings`.
 ///
 /// Worth reading separately from [apnsDeviceToken]: a declined prompt never

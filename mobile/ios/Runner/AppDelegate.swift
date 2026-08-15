@@ -234,6 +234,8 @@ import UserNotifications
           )
         )
       }
+    case "pushAppProfile":
+      result(BuzzDevPushEnrollmentDriver.appProfile)
     case "notificationAuthorization":
       // Reported separately from the APNs token because the two failure modes
       // are indistinguishable from Dart: a declined prompt never calls

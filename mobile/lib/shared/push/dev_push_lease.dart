@@ -11,7 +11,7 @@ import 'push_bridge.dart';
 
 const buzzPushLeaseKind = 30350;
 const buzzPushMessageKind = 9;
-const buzzDevPushAppProfile = 'buzz-ios-sandbox';
+String get buzzDevPushAppProfile => buzzPushAppProfile;
 const buzzPushTransport = 'apns';
 const _maxSafeJsonInteger = 9007199254740991;
 const _maxLeaseLifetimeSeconds = 2592000;
@@ -159,8 +159,8 @@ class BuzzPushLeaseDescriptor {
       if (id == buzzDevPushAppProfile) transport = candidate;
     }
     if (transport != buzzPushTransport) {
-      throw const FormatException(
-        'NIP-11 does not advertise the sandbox APNs profile',
+      throw FormatException(
+        'NIP-11 does not advertise the $buzzDevPushAppProfile APNs profile',
       );
     }
 
@@ -454,7 +454,7 @@ void validateBuzzPushLeasePlaintext(
   final origin = _canonicalOrigin(plaintext['origin']);
   _checkStringLength(origin, maxStringLength, name: 'origin');
   if (plaintext['app_profile'] != buzzDevPushAppProfile) {
-    throw const FormatException('lease app_profile must be buzz-ios-sandbox');
+    throw FormatException('lease app_profile must be $buzzDevPushAppProfile');
   }
   if (plaintext['transport'] != buzzPushTransport) {
     throw const FormatException('lease transport must be apns');
@@ -540,7 +540,7 @@ void _validateGrant(
     );
   }
   if (grant.appProfile != buzzDevPushAppProfile) {
-    throw const FormatException('Endpoint grant is not for buzz-ios-sandbox');
+    throw FormatException('Endpoint grant is not for $buzzDevPushAppProfile');
   }
   if (grant.endpointGrant.isEmpty ||
       utf8.encode(grant.endpointGrant).length > descriptor.maxEndpointLength) {

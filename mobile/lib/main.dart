@@ -12,6 +12,9 @@ void main() => runBuzzApp(const PushLeaseBootstrap(child: App()));
 Future<void> runBuzzApp(Widget app) async {
   WidgetsFlutterBinding.ensureInitialized();
   installBuzzPushMethodHandler();
+  // Before the first frame, so the lease bootstrap and every descriptor check
+  // agree with the profile the native enrollment request will actually send.
+  await syncBuzzPushAppProfile();
 
   // Pre-load preferences so the first frame uses the saved theme/accent.
   final prefs = await SharedPreferences.getInstance();

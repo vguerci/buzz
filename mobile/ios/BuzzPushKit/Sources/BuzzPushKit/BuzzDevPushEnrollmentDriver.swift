@@ -339,7 +339,23 @@ struct BuzzDCAppAttestProvider: BuzzDevAppAttesting {
 
 /// Enrollment and delegation driver for real App Attest and the gated debug bypass.
 public final class BuzzDevPushEnrollmentDriver {
-  public static let appProfile = "buzz-ios-sandbox"
+  public static let productionAppProfile = "buzz-ios-production"
+  public static let sandboxAppProfile = "buzz-ios-sandbox"
+
+  /// The profile this build enrols as, derived from the same build setting that
+  /// fills the `aps-environment` entitlement.
+  ///
+  /// It has to track the binary rather than be a constant: a TestFlight build
+  /// carries a production APNs token and attests production, so enrolling it as
+  /// sandbox is rejected by a gateway that enables only
+  /// `buzz-ios-production` — as an opaque `400 invalid_request`, because the
+  /// profile is checked alongside the wire version and the expiry.
+  public static var appProfile: String {
+    let environment =
+      Bundle.main.object(forInfoDictionaryKey: "BuzzPushEnvironment") as? String
+    return environment == "production" ? productionAppProfile : sandboxAppProfile
+  }
+
   public static let endpointEpoch: Int64 = 1
 
   private let gatewayBaseURL: URL
