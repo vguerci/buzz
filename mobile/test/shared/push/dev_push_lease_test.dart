@@ -81,6 +81,81 @@ void main() {
     });
   });
 
+  test('adds a channel subscription for pinned channels', () async {
+    Map<String, dynamic>? submitted;
+    await publishBuzzDevPushLease(
+      grant: grant,
+      descriptor: descriptor,
+      nsec: signer.nsec,
+      memberPubkey: signer.public,
+      now: () => now,
+      // Deliberately unsorted and duplicated: the lease is a set, and an
+      // unchanged selection must not produce a different lease.
+      pinnedChannels: const [
+        '713fed4f-ee3e-4392-ab41-e6a6a04b5778',
+        '113fed4f-ee3e-4392-ab41-e6a6a04b5778',
+        '713fed4f-ee3e-4392-ab41-e6a6a04b5778',
+      ],
+      submit:
+          ({required kind, required content, required tags, createdAt}) async {
+            submitted = {'content': content};
+            return const NostrEvent(
+              id: 'accepted-id',
+              pubkey: '',
+              createdAt: 0,
+              kind: 0,
+              tags: [],
+              content: 'saved',
+              sig: '',
+            );
+          },
+    );
+
+    final plaintext = jsonDecode(
+      nip44Decrypt(
+        getConversationKey(relay.secret, signer.public),
+        submitted!['content'] as String,
+      ),
+    );
+    expect(plaintext['subscriptions'], [
+      {
+        'filter': {
+          'kinds': [9],
+          '#p': [signer.public],
+        },
+        'class': 'default',
+      },
+      {
+        'filter': {
+          'kinds': [9],
+          '#h': [
+            '113fed4f-ee3e-4392-ab41-e6a6a04b5778',
+            '713fed4f-ee3e-4392-ab41-e6a6a04b5778',
+          ],
+        },
+        'class': 'default',
+      },
+    ]);
+  });
+
+  test('rejects a pinned channel that is not a lowercase UUID', () async {
+    await expectLater(
+      publishBuzzDevPushLease(
+        grant: grant,
+        descriptor: descriptor,
+        nsec: signer.nsec,
+        memberPubkey: signer.public,
+        now: () => now,
+        pinnedChannels: const ['not-a-uuid'],
+        submit:
+            ({required kind, required content, required tags, createdAt}) async {
+              fail('must not publish a lease the executor will reject');
+            },
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test(
     'mutation control rejects relay OK false then accepts restored event',
     () async {

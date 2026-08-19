@@ -18,6 +18,11 @@ const _maxLeaseLifetimeSeconds = 2592000;
 const _lowercaseHex64Pattern = r'^[0-9a-f]{64}$';
 const _installationIdPattern = r'^[0-9a-f]{32}$';
 
+/// The `h_grammar` this relay advertises: `uuid-v4-lowercase`. A `#h` value
+/// failing it is rejected by the executor, so it is rejected here first.
+const _channelIdPattern =
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+
 class BuzzPushLeaseDescriptor {
   final String origin;
   final String executorKeyId;
@@ -29,6 +34,11 @@ class BuzzPushLeaseDescriptor {
   final int maxEndpointLength;
   final int maxStringLength;
 
+  /// NIP-PL `max_h`: how many channels one subscription may name. Kept because
+  /// a channel subscription is the only filter this client builds whose width
+  /// the user controls.
+  final int maxChannels;
+
   const BuzzPushLeaseDescriptor({
     required this.origin,
     required this.executorKeyId,
@@ -39,6 +49,7 @@ class BuzzPushLeaseDescriptor {
     required this.maxPlaintextLength,
     required this.maxEndpointLength,
     required this.maxStringLength,
+    required this.maxChannels,
   });
 
   factory BuzzPushLeaseDescriptor.fromRelayInformation(
@@ -257,6 +268,7 @@ class BuzzPushLeaseDescriptor {
       maxPlaintextLength: limitation['max_plaintext_len'] as int,
       maxEndpointLength: limitation['max_endpoint_len'] as int,
       maxStringLength: maxStringLength,
+      maxChannels: limitation['max_h'] as int,
     );
   }
 }
@@ -319,6 +331,7 @@ Future<BuzzPushLeasePublication> publishBuzzDevPushLease({
   required String nsec,
   required String memberPubkey,
   required BuzzPushLeaseSubmit submit,
+  List<String> pinnedChannels = const [],
   DateTime Function() now = DateTime.now,
 }) async {
   _validateGrant(grant, descriptor);
@@ -334,6 +347,24 @@ Future<BuzzPushLeasePublication> publishBuzzDevPushLease({
   if (signingPubkey != normalizedMemberPubkey) {
     throw const FormatException(
       'Authenticated signing key does not match the lease member pubkey',
+    );
+  }
+
+  // Normalize before the lease is built, so a malformed channel id fails here
+  // rather than as an opaque relay rejection of the whole publication.
+  final normalizedChannels = <String>[];
+  for (final channel in pinnedChannels) {
+    final normalized = channel.trim().toLowerCase();
+    if (normalized.isEmpty) continue;
+    if (!RegExp(_channelIdPattern).hasMatch(normalized)) {
+      throw FormatException('Pinned channel id is not a lowercase UUID: $channel');
+    }
+    if (!normalizedChannels.contains(normalized)) normalizedChannels.add(normalized);
+  }
+  normalizedChannels.sort();
+  if (normalizedChannels.length > descriptor.maxChannels) {
+    throw FormatException(
+      'Pinned channels (${normalizedChannels.length}) exceed the relay limit of ${descriptor.maxChannels}',
     );
   }
 
@@ -362,12 +393,25 @@ Future<BuzzPushLeasePublication> publishBuzzDevPushLease({
         },
         'class': 'default',
       },
+      // Channels the user asked to be woken for wholesale. Kept as a second
+      // subscription rather than widening the first: a mention must keep
+      // matching after the channel is unpinned, and NIP-PL evaluates each
+      // subscription independently.
+      if (normalizedChannels.isNotEmpty)
+        {
+          'filter': {
+            'kinds': [buzzPushMessageKind],
+            '#h': normalizedChannels,
+          },
+          'class': 'default',
+        },
     ],
   };
   validateBuzzPushLeasePlaintext(
     plaintextMap,
     maxEndpointLength: descriptor.maxEndpointLength,
     maxStringLength: descriptor.maxStringLength,
+    maxChannels: descriptor.maxChannels,
   );
   final plaintext = jsonEncode(plaintextMap);
   if (utf8.encode(plaintext).length > descriptor.maxPlaintextLength) {
@@ -409,6 +453,7 @@ Future<BuzzPushLeasePublication> publishBuzzDevPushLeaseThroughRelay({
   required String nsec,
   required String memberPubkey,
   required SignedEventRelay relay,
+  List<String> pinnedChannels = const [],
   DateTime Function() now = DateTime.now,
 }) => publishBuzzDevPushLease(
   grant: grant,
@@ -416,6 +461,7 @@ Future<BuzzPushLeasePublication> publishBuzzDevPushLeaseThroughRelay({
   nsec: nsec,
   memberPubkey: memberPubkey,
   submit: relay.submit,
+  pinnedChannels: pinnedChannels,
   now: now,
 );
 
@@ -423,6 +469,7 @@ void validateBuzzPushLeasePlaintext(
   Map<String, dynamic> plaintext, {
   int maxEndpointLength = 4096,
   int maxStringLength = 512,
+  int maxChannels = 16,
 }) {
   _requireExactKeys(
     plaintext,
@@ -481,42 +528,65 @@ void validateBuzzPushLeasePlaintext(
     plaintext['subscriptions'],
     name: 'subscriptions',
   );
-  if (subscriptions.length != 1) {
-    throw const FormatException('development lease requires one subscription');
-  }
-  final subscription = subscriptions.single;
-  _requireExactKeys(
-    subscription,
-    required: const {'filter', 'class'},
-    allowed: const {'filter', 'class'},
-    name: 'subscription',
-  );
-  if (subscription['class'] != 'default') {
-    throw const FormatException('development lease class must be default');
-  }
-  final filter = _stringMap(
-    subscription['filter'],
-    name: 'subscription filter',
-  );
-  _requireExactKeys(
-    filter,
-    required: const {'kinds', '#p'},
-    allowed: const {'kinds', '#p'},
-    name: 'subscription filter',
-  );
-  final kinds = _intList(filter['kinds'], name: 'filter kinds');
-  if (kinds.length != 1 || kinds.single != buzzPushMessageKind) {
+  // One mention subscription, optionally followed by one channel subscription.
+  // The mention entry stays first and mandatory: pinning a channel adds reach,
+  // it never replaces being addressed directly.
+  if (subscriptions.isEmpty || subscriptions.length > 2) {
     throw const FormatException(
-      'development lease must subscribe to kind 9 only',
+      'development lease requires a mention subscription and at most one channel subscription',
     );
   }
-  final pubkeys = _stringList(filter['#p'], name: 'filter #p');
-  if (pubkeys.length != 1) {
-    throw const FormatException(
-      'development lease requires one #p member pubkey',
+  for (final (index, subscription) in subscriptions.indexed) {
+    _requireExactKeys(
+      subscription,
+      required: const {'filter', 'class'},
+      allowed: const {'filter', 'class'},
+      name: 'subscription',
     );
+    if (subscription['class'] != 'default') {
+      throw const FormatException('development lease class must be default');
+    }
+    final filter = _stringMap(
+      subscription['filter'],
+      name: 'subscription filter',
+    );
+    final selector = index == 0 ? '#p' : '#h';
+    _requireExactKeys(
+      filter,
+      required: {'kinds', selector},
+      allowed: {'kinds', selector},
+      name: 'subscription filter',
+    );
+    final kinds = _intList(filter['kinds'], name: 'filter kinds');
+    if (kinds.length != 1 || kinds.single != buzzPushMessageKind) {
+      throw const FormatException(
+        'development lease must subscribe to kind 9 only',
+      );
+    }
+    if (index == 0) {
+      final pubkeys = _stringList(filter['#p'], name: 'filter #p');
+      if (pubkeys.length != 1) {
+        throw const FormatException(
+          'development lease requires one #p member pubkey',
+        );
+      }
+      _lowercaseHex64(pubkeys.single, name: 'filter #p member pubkey');
+      continue;
+    }
+    final channels = _stringList(filter['#h'], name: 'filter #h');
+    if (channels.isEmpty || channels.length > maxChannels) {
+      throw const FormatException(
+        'channel subscription must name between one and max_h channels',
+      );
+    }
+    for (final channel in channels) {
+      if (!RegExp(_channelIdPattern).hasMatch(channel)) {
+        throw const FormatException(
+          'filter #h values must be lowercase UUID channel ids',
+        );
+      }
+    }
   }
-  _lowercaseHex64(pubkeys.single, name: 'filter #p member pubkey');
 }
 
 void _validateGrant(
