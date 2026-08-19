@@ -2,6 +2,7 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../../features/channels/channel_push_pins/channel_push_pins_storage.dart';
 import '../community/community.dart';
 import '../relay/nostr_models.dart';
 import '../relay/relay_provider.dart';
@@ -161,15 +162,25 @@ Future<void> registerBuzzPushCommunitySnapshot(
 ) async {
   if (defaultTargetPlatform != TargetPlatform.iOS) return;
   try {
-    final snapshots = [
-      for (final community in communities)
+    // Pins are read here rather than passed in, so the snapshot and the lease
+    // cannot disagree about which channels are pinned — both derive from the
+    // one per-identity store. Keeping the signature also leaves every existing
+    // caller and test override untouched.
+    final snapshots = <BuzzPushCommunitySnapshot>[];
+    for (final community in communities) {
+      final pubkey = community.pubkey ?? pubkeyFromNsec(community.nsec);
+      snapshots.add(
         BuzzPushCommunitySnapshot(
           id: community.id,
           name: community.name,
           relayUrl: community.relayUrl,
-          pubkey: community.pubkey ?? pubkeyFromNsec(community.nsec),
+          pubkey: pubkey,
+          pinnedChannels: pubkey == null
+              ? const []
+              : (await ChannelPushPinsStorage(pubkey).load()).pinnedChannelIds,
         ),
-    ];
+      );
+    }
     final signingKeys = <String, String>{};
     for (final community in communities) {
       final nsec = community.nsec;

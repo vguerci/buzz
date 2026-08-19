@@ -67,6 +67,68 @@ final class BuzzPushNotificationResolverTests: XCTestCase {
     XCTAssertEqual(URLProtocolStub.requests.count, 1)
   }
 
+  func testResolveQueriesOnlyMentionsWhenNoChannelIsPinned() throws {
+    URLProtocolStub.handler = { request in
+      Self.response(request, status: 200, data: Data("[]".utf8))
+    }
+    _ = resolve(makeResolver(communitiesData: try snapshotData([community()])))
+
+    let filters = try Self.requestFilters(XCTUnwrap(URLProtocolStub.requests.first))
+    XCTAssertEqual(filters.count, 1)
+    XCTAssertNotNil(filters[0]["#p"])
+    XCTAssertNil(filters[0]["#h"])
+  }
+
+  func testResolveAlsoQueriesPinnedChannels() throws {
+    URLProtocolStub.handler = { request in
+      Self.response(request, status: 200, data: Data("[]".utf8))
+    }
+    _ = resolve(makeResolver(
+      communitiesData: try snapshotData([community(pinnedChannels: ["channel-id"])])
+    ))
+
+    let filters = try Self.requestFilters(XCTUnwrap(URLProtocolStub.requests.first))
+    XCTAssertEqual(filters.count, 2)
+    XCTAssertEqual(filters[1]["#h"] as? [String], ["channel-id"])
+    XCTAssertEqual(filters[1]["kinds"] as? [Int], [9])
+  }
+
+  /// The bug this exists to prevent: a pinned channel wakes the device, the
+  /// extension can only see mentions, and the banner describes a days-old
+  /// mention instead of the message that just arrived.
+  func testResolvePrefersTheNewestEventAcrossMentionsAndPinnedChannels() throws {
+    let staleMention = event(
+      id: "stale", content: "mentioned you last week", createdAt: Self.now - 604_800,
+      tags: [["p", Self.ownPubkey]]
+    )
+    let freshChannelMessage = event(
+      id: "fresh", content: "alert fired", createdAt: Self.now,
+      tags: [["h", "channel-id"]]
+    )
+
+    let result = BuzzPushNotificationResolver.decodeResolution(
+      events: [staleMention, freshChannelMessage],
+      community: community(pinnedChannels: ["channel-id"])
+    )
+
+    XCTAssertEqual(result?.0.body, "alert fired")
+    // The banner groups by channel, so a pinned-channel wake lands in that
+    // channel's thread rather than the community's catch-all.
+    XCTAssertEqual(result?.0.threadIdentifier, "channel-id")
+  }
+
+  func testSnapshotWithoutPinnedChannelsStillDecodes() throws {
+    let data = try JSONSerialization.data(withJSONObject: [
+      "communities": [[
+        "id": "community-id", "name": "Community",
+        "relayUrl": "https://relay.example", "pubkey": Self.ownPubkey,
+      ]]
+    ])
+    let snapshot = try JSONDecoder().decode(BuzzPushSnapshot.self, from: data)
+
+    XCTAssertEqual(snapshot.communities.first?.pinnedChannels, [])
+  }
+
   func testDecodeResolutionFiltersOwnPubkeyEvent() {
     let result = BuzzPushNotificationResolver.decodeResolution(
       events: [event(pubkey: Self.ownPubkey, content: "This should be filtered")],
@@ -173,21 +235,49 @@ final class BuzzPushNotificationResolverTests: XCTestCase {
     id: String = "community-id",
     name: String = "Community",
     relayUrl: String = "https://relay.example",
-    pubkey: String? = ownPubkey
+    pubkey: String? = ownPubkey,
+    pinnedChannels: [String] = []
   ) -> BuzzPushCommunity {
-    BuzzPushCommunity(id: id, name: name, relayUrl: relayUrl, pubkey: pubkey)
+    BuzzPushCommunity(
+      id: id, name: name, relayUrl: relayUrl, pubkey: pubkey,
+      pinnedChannels: pinnedChannels
+    )
   }
 
   private func snapshotData(_ communities: [BuzzPushCommunity]) throws -> Data {
     let dictionaries: [[String: Any]] = communities.map {
-      [
+      var dictionary: [String: Any] = [
         "id": $0.id,
         "name": $0.name,
         "relayUrl": $0.relayUrl,
         "pubkey": $0.pubkey as Any,
       ]
+      if !$0.pinnedChannels.isEmpty {
+        dictionary["pinnedChannels"] = $0.pinnedChannels
+      }
+      return dictionary
     }
     return try JSONSerialization.data(withJSONObject: ["communities": dictionaries])
+  }
+
+  private static func requestFilters(_ request: URLRequest) throws -> [[String: Any]] {
+    let data: Data
+    if let httpBody = request.httpBody {
+      data = httpBody
+    } else {
+      let stream = try XCTUnwrap(request.httpBodyStream)
+      stream.open()
+      defer { stream.close() }
+      var bytes = Data()
+      var buffer = [UInt8](repeating: 0, count: 1_024)
+      while true {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        if count <= 0 { break }
+        bytes.append(buffer, count: count)
+      }
+      data = bytes
+    }
+    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
   }
 
   private func event(

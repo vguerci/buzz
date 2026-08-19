@@ -8,11 +8,18 @@ class BuzzPushCommunitySnapshot {
   final String relayUrl;
   final String? pubkey;
 
+  /// Channels pinned for whole-channel push. The lease decides what wakes the
+  /// device; this decides what the notification service extension is able to
+  /// describe. A wake whose cause the extension cannot fetch renders as an
+  /// unrelated older mention, so both lists are written from the same source.
+  final List<String> pinnedChannels;
+
   const BuzzPushCommunitySnapshot({
     required this.id,
     required this.name,
     required this.relayUrl,
     this.pubkey,
+    this.pinnedChannels = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -20,14 +27,22 @@ class BuzzPushCommunitySnapshot {
     'name': name,
     'relayUrl': relayUrl,
     if (pubkey != null) 'pubkey': pubkey,
+    if (pinnedChannels.isNotEmpty) 'pinnedChannels': pinnedChannels,
   };
 
   factory BuzzPushCommunitySnapshot.fromJson(Map<String, dynamic> json) {
+    final rawPinned = json['pinnedChannels'];
     return BuzzPushCommunitySnapshot(
       id: json['id'] as String,
       name: json['name'] as String,
       relayUrl: json['relayUrl'] as String,
       pubkey: json['pubkey'] as String?,
+      pinnedChannels: rawPinned is List
+          ? [
+              for (final value in rawPinned)
+                if (value is String) value,
+            ]
+          : const [],
     );
   }
 }

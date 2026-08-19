@@ -94,7 +94,19 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
     let watermark = PushWatermark.queryTimestamp(storedWatermark: storedWatermark)
     if watermark != storedWatermark { defaults?.set(watermark, forKey: watermarkKey) }
     if let since = PushWatermark.querySince(watermark: watermark) { filter["since"] = since }
-    guard let body = try? JSONSerialization.data(withJSONObject: [filter]) else { completion(nil); return }
+    // A pinned channel wakes the device without addressing it, so the mention
+    // filter alone cannot see what caused the wake — it would resolve to the
+    // newest mention instead, which is an older, unrelated message. Ask for
+    // both in one request; `decodeResolution` still picks the newest.
+    var filters: [[String: Any]] = [filter]
+    if !community.pinnedChannels.isEmpty {
+      var channelFilter: [String: Any] = [
+        "kinds": [9], "#h": community.pinnedChannels, "limit": 10,
+      ]
+      if let since = filter["since"] { channelFilter["since"] = since }
+      filters.append(channelFilter)
+    }
+    guard let body = try? JSONSerialization.data(withJSONObject: filters) else { completion(nil); return }
     let url = URL(string: "/query", relativeTo: community.relayURL)!
     var request = URLRequest(url: url)
     request.httpMethod = "POST"; request.httpBody = body; request.timeoutInterval = 8
@@ -179,11 +191,34 @@ public struct BuzzPushCommunity: Decodable, Equatable, Sendable {
   public let relayUrl: String
   public let pubkey: String?
 
-  public init(id: String, name: String, relayUrl: String, pubkey: String?) {
+  /// Channels the user pinned for whole-channel push. Absent in snapshots
+  /// written by an older build, which must keep resolving mentions rather than
+  /// failing to decode.
+  public let pinnedChannels: [String]
+
+  public init(
+    id: String, name: String, relayUrl: String, pubkey: String?,
+    pinnedChannels: [String] = []
+  ) {
     self.id = id
     self.name = name
     self.relayUrl = relayUrl
     self.pubkey = pubkey
+    self.pinnedChannels = pinnedChannels
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(String.self, forKey: .id)
+    name = try container.decode(String.self, forKey: .name)
+    relayUrl = try container.decode(String.self, forKey: .relayUrl)
+    pubkey = try container.decodeIfPresent(String.self, forKey: .pubkey)
+    pinnedChannels =
+      try container.decodeIfPresent([String].self, forKey: .pinnedChannels) ?? []
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case id, name, relayUrl, pubkey, pinnedChannels
   }
 
   var relayURL: URL {
