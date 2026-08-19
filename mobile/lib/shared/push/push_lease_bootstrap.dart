@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
+import '../../features/channels/channel_push_pins/channel_push_pins_provider.dart';
 import '../relay/relay_provider.dart';
 import '../relay/relay_session.dart';
 import '../relay/signed_event_relay.dart';
@@ -29,8 +30,15 @@ class PushLeaseBootstrap extends HookConsumerWidget {
     final session = ref.watch(relaySessionProvider);
     final config = ref.watch(relayConfigProvider);
     final memberPubkey = ref.watch(myPubkeyProvider);
+    final pins = ref.watch(channelPushPinsProvider);
     final nsec = config.nsec;
     final deviceToken = apnsDeviceToken.value;
+    // A lease is a snapshot of what the user wants woken for, so a changed pin
+    // set is as much a reason to republish as a rotated APNs token. Enrolment
+    // mints the next generation, which is what makes the replacement
+    // acceptable to the executor.
+    final pinnedChannels = pins.pinnedChannelIds;
+    final pinKey = pinnedChannels.join(',');
     useEffect(() {
       final attemptKey = [
         session.status.name,
@@ -38,6 +46,7 @@ class PushLeaseBootstrap extends HookConsumerWidget {
         nsec,
         memberPubkey,
         deviceToken,
+        pinKey,
       ].join('|');
       if (session.status == SessionStatus.connected &&
           nsec != null &&
@@ -56,7 +65,7 @@ class PushLeaseBootstrap extends HookConsumerWidget {
           // so a failed enrollment is indistinguishable from one that never
           // ran: no grant, no notification, and nothing on screen.
           unawaited(
-            _publish(config, memberPubkey, relay).catchError((
+            _publish(config, memberPubkey, relay, pinnedChannels).catchError((
               Object error,
               StackTrace stack,
             ) {
@@ -68,7 +77,14 @@ class PushLeaseBootstrap extends HookConsumerWidget {
         });
       }
       return null;
-    }, [session.status, config.baseUrl, nsec, memberPubkey, deviceToken]);
+    }, [
+      session.status,
+      config.baseUrl,
+      nsec,
+      memberPubkey,
+      deviceToken,
+      pinKey,
+    ]);
     return child;
   }
 
@@ -76,6 +92,7 @@ class PushLeaseBootstrap extends HookConsumerWidget {
     RelayConfig config,
     String memberPubkey,
     SignedEventRelay relay,
+    List<String> pinnedChannels,
   ) async {
     final descriptor = await fetchBuzzPushLeaseDescriptor(config.baseUrl);
     final grant = await enrollBuzzDevPush(config.wsUrl, Env.pushGatewayUrl);
@@ -97,6 +114,7 @@ class PushLeaseBootstrap extends HookConsumerWidget {
       nsec: nsec,
       memberPubkey: memberPubkey,
       relay: relay,
+      pinnedChannels: pinnedChannels,
     );
     await markBuzzDevPushLeasePublished(grant);
   }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -14,6 +15,7 @@ import '../../shared/widgets/sheet_divider.dart';
 import 'channel.dart';
 import 'channel_management_provider.dart';
 import 'channel_mutes/channel_mutes_provider.dart';
+import 'channel_push_pins/channel_push_pins_provider.dart';
 import 'channel_sections/channel_sections_provider.dart';
 import 'channel_stars/channel_stars_provider.dart';
 import 'channels_provider.dart';
@@ -63,6 +65,7 @@ class ChannelActionsSheet extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isPushPinned = ref.watch(channelPushPinsProvider).isPinned(channel.id);
     final isMuted =
         ref.watch(channelMutesProvider).store.channels[channel.id]?.muted ==
         true;
@@ -192,6 +195,31 @@ class ChannelActionsSheet extends ConsumerWidget {
                       : notifier.muteChannel(channel.id);
                 },
               ),
+              // Offered only where it can be honoured: a muted channel already
+              // says the opposite, and push is iOS-only in this build.
+              if (!isMuted && defaultTargetPlatform == TargetPlatform.iOS)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    isPushPinned ? LucideIcons.bellRing : LucideIcons.bellPlus,
+                  ),
+                  title: Text(
+                    isPushPinned
+                        ? 'Notify on mentions only'
+                        : 'Notify on every message',
+                  ),
+                  subtitle: Text(
+                    isPushPinned
+                        ? 'Currently pushing every message in this channel'
+                        : 'Push even when nobody mentions you',
+                  ),
+                  onTap: () {
+                    close();
+                    ref
+                        .read(channelPushPinsProvider.notifier)
+                        .toggle(channel.id);
+                  },
+                ),
               if (!channel.isDm)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
